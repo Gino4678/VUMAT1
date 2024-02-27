@@ -27,7 +27,7 @@ C     ******************************************************
      2  DFGRD0(3,3), DFGRD1(3,3)  
      3  DIMENSIONRELAX(NPROPS), RELAXTIME(NPROPS)  
 C     
-      parameter (zero=0.0d0, one=1.0d0, two=2.0d0, three=3.0d0)
+      parameter (zero=0.0d0, one=1.0d0, two=2.0d0, three=3.0d0, four=4.0d0)
 
 C     ******************************************************
 C     Elastic Modulus and Poisson's Ratio  
@@ -45,116 +45,59 @@ C     Initialize relaxation modulus and relaxation time arrays
 C     ******************************************************
 
       DO I = 1,NMAX 
-      RELAX(I)=PROPS(I + 2)  ! Relaxation modulus  
-      RELAXTIME(I)=PROPS(I + NMAX + 1)  ! Relaxation time  
+      RELAX(I) = PROPS(I + 2)  ! Relaxation modulus  
+      RELAXTIME(I) = PROPS(I + NMAX + 1)  ! Relaxation time  
+      END DO  
+C     Compute elastic stiffness matrix  
+      C11 = K + (four/three)*G  
+      C12 = K - (two/three)*G  
+      C44 = G
+
+C     ******************************************************
+C     End Pre work
+C     ******************************************************
+
+C     ******************************************************
+C     Initialize stress and internal variables     
+C     ******************************************************
+ 
+      IF (KSTEP == 1 .AND. KINC == 1) THEN  
+      DO I = 1, NTENS  
+          STRESS(I) = 0.0  
+      END DO  
+      DO I = 1, NSTATV  
+          STATEV(I) = 0.0  
+      END DO  
+      END IF  
+
+C     ******************************************************
+C     Compute viscous stress increment  
+C     ******************************************************
+
+      VISCOUS_STRESS = 0.0  
+      DO I = 1, NMAX  
+      RELAX_TERM = RELAX(I) * DSTRAIN(1) * EXP(-DTIME / RELAXTIME(I))  
+      VISCOUS_STRESS = VISCOUS_STRESS + RELAX_TERM  
       END DO  
 
 C     ******************************************************
-C     End: Pre work
+C     Compute total stress increment  
 C     ******************************************************
-c **************************************************
-c * Start: 1st elastic increment
-c **************************************************
-      if (totalTime.eq.zero) then
-      ! if (totalTIme.ge.zero) then
-            do km=1, nblock
-c volume strain increment
-                  dPhi=strainInc(km,1)+strainInc(km,2)
-     &                      +strainInc(km,3)
-c update normal stress component
-                  stressNew(km,1)=stressOld(km,1)
-     &                  +GBar0Two*strainInc(km,1)+aLam0*dPhi
-                  stressNew(km,2)=stressOld(km,2)
-     &                  +GBar0Two*strainInc(km,2)+aLam0*dPhi
-                  stressNew(km,3)=stressOld(km,3)
-     &                  +GBar0Two*strainInc(km,3)+aLam0*dPhi
-c update shear stress component
-                  stressNew(km,4)=stressOld(km,4)
-     &                  +GBar0Two*strainInc(km,4)
-                  stressNew(km,5)=stressOld(km,5)
-     &                  +GBar0Two*strainInc(km,5)
-                  stressNew(km,6)=stressOld(km,6)
-     &                  +GBar0Two*strainInc(km,6)
-            end do
-c **************************************************
-c * End: 1st elastic increment
-c **************************************************
-      else
-c **************************************************
-c * Start: following increments
-c **************************************************
-            do km=1, nblock
-                  ! if (totalTime.gt.8.0) then
-                  ! write(*,*) 'Please input an integer:'
-                  ! read(*,*) tmpread
-                  ! end if
-c read the visco strain 1 at start of this increment
-                  do i=1, 6
-                        e1Old(i)=stateOld(km,i)
-                  end do
-                  phi1Old=stateOld(km,7)
-c get strain increment
-                  do i=1, 6
-                        dStrain(i)=strainInc(km,i)
-                  end do
-                  call TensorDecomp(dStrain, dE, dPhi)
-c calculate stress increment due to visco 1
-                  pre1=one-exp(-dt/GTauBar)
-                  pre2=GTauBar/dt
-                  do i=1, 6
-                        dE1(i)=pre1*(pre2*dE(i)-e1Old(i))
-                  end do
-                  pre3=one-exp(-dt/aKTauBar)
-                  pre4=aKTauBar/dt
-                  dPhi1=pre3*(pre4*dPhi-phi1Old)
-c update stress
-                  do i=1, 6
-                        dS(i)=GBarInfTwo*dE(i)+GBar1Two*dE1(i)
-                  end do
-                  dP=aKBarInf*dPhi+aKBar1*dPhi1
-                  do i=1, 3
-                        stressNew(km,i)=stressOld(km,i)+dS(i)+dP
-                  end do
-                  do i=4, 6
-                        stressNew(km,i)=stressOld(km,i)+dS(i)
-                  end do
-c update state variables
-                  do i=1, 6
-                        stateNew(km,i)=e1Old(i)+dE1(i)
-                  end do
-                  stateNew(km,7)=phi1Old+dPhi1
-            end do
-c **************************************************
-c * End: following increments
-c **************************************************
-      end if
-c
-      return
-      end
-c
-      subroutine TensorDecomp(a,aDev,aTrace)
-c
-c     param:
-c     a: an symmetric tensor in Voigt notation
-c
-c     return:
-c     aDev: devatoric part of a in Voigt notation
-c     aTrace: trace of a
-c
-      include 'vaba_param.inc'
-c
-      dimension a(6), aDev(6)
-c
-      parameter three=3.0d0
-c
-      aTrace=a(1)+a(2)+a(3)
-c
-      do i=1, 3
-            aDev(i)=a(i)-aTrace/three
-      end do
-      do i=4, 6
-            aDev(i)=a(i)
-      end do
-c
-      return
-      end      
+
+      DO I = 1, NTENS  
+      DSTRESS(I) = C11 * DSTRAIN(I) + C12 * SUM(DSTRAIN) * IF(I .LE. NDI ,1.0 , 0.0)  
+      IF (I .GT. NDI) THEN  
+          DSTRESS(I) = C44 * DSTRAIN(I)  
+      END IF  
+      END DO  
+      DSTRESS(1) = DSTRESS(1) + VISCOUS_STRESS 
+
+C     ******************************************************
+C     Update stress and internal variables  
+C  
+      DO I = 1, NTENS  
+      STRESS(I) = STRESS(I) + DSTRESS(I)  
+      END DO  
+C  
+      RETURN  
+END
